@@ -116,7 +116,7 @@ def load_and_move_materials():
     logging.info("=== ЗАГРУЗКА МАТЕРИАЛОВ ===")
     material_pairs = []
     
-    # Сначала проверяем папку wait
+    # Проверяем папку wait (файлы, которые уже в очереди)
     wait_files = os.listdir(pending_folder) if os.path.exists(pending_folder) else []
     wait_images = [f for f in wait_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
     wait_texts = [f for f in wait_files if f.lower().endswith('.txt')]
@@ -130,7 +130,7 @@ def load_and_move_materials():
             if os.path.exists(image_path) and os.path.exists(text_path):
                 material_pairs.append((image_path, text_path))
 
-    # Если в wait пусто — берём из materials и переносим в wait
+    # Если в wait пусто — берём из materials
     if not material_pairs:
         materials_files = os.listdir(materials_folder) if os.path.exists(materials_folder) else []
         images = [f for f in materials_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
@@ -598,6 +598,7 @@ async def on_startup(bot: Bot):
 
     asyncio.create_task(run_scheduler_loop())
     
+    # При запуске на Render загружаем материалы из текущей среды
     load_and_move_materials()
     if material_pairs:
         schedule_posts()
