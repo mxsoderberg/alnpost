@@ -40,12 +40,9 @@ TZ_RIGA = ZoneInfo("Europe/Riga")
 # Глобальные структуры
 # ─────────────────────────────────────────────────────────────
 material_pairs = []
-PUBLICATIONS_PER_DAY = 2  # По умолчанию 2 поста в день
+PUBLICATIONS_PER_DAY = 2
 
-# Абсолютные задачи публикаций (источник истины для отображения)
 scheduled_tasks = []
-
-# Защита от одновременных кликов
 _freq_lock = asyncio.Lock()
 
 # Пути к папкам
@@ -54,12 +51,10 @@ materials_folder = os.path.join(base_path, "materials")
 pending_folder = os.path.join(base_path, "wait")
 archive_folder = os.path.join(base_path, "arch")
 
-# Создаем необходимые папки
 os.makedirs(materials_folder, exist_ok=True)
 os.makedirs(pending_folder, exist_ok=True)
 os.makedirs(archive_folder, exist_ok=True)
 
-# Флаг для тестового режима
 is_test_mode = False
 original_material_pairs = []
 
@@ -67,11 +62,9 @@ original_material_pairs = []
 # Время и утилиты
 # ─────────────────────────────────────────────────────────────
 def get_current_time() -> datetime:
-    """Текущее осознанное время в Риге (учитывает DST)"""
     return datetime.now(tz=TZ_RIGA)
 
 def describe_part_of_day(dt_local: datetime) -> str:
-    """Описание части дня"""
     h = dt_local.hour
     if 6 <= h <= 11:
         return "🌅 Утро"
@@ -88,17 +81,16 @@ def random_time(start_hour, end_hour):
     return f"{hour:02d}:{minute:02d}"
 
 # ─────────────────────────────────────────────────────────────
-# UI
+# UI - УПРОЩЕННОЕ МЕНЮ
 # ─────────────────────────────────────────────────────────────
 def get_main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(
         keyboard=[
             [types.KeyboardButton(text="📊 Статистика"), types.KeyboardButton(text="📅 Расписание")],
-            [types.KeyboardButton(text="⏰ Следующие"), types.KeyboardButton(text="📋 Все публикации")],
             [types.KeyboardButton(text="🔄 Перезагрузить"), types.KeyboardButton(text="⏹ Остановить")],
             [types.KeyboardButton(text="⏸ Пауза"), types.KeyboardButton(text="▶️ Продолжить")],
-            [types.KeyboardButton(text="🗑 Очистить очередь"), types.KeyboardButton(text="🧹 Полная очистка")],
-            [types.KeyboardButton(text="⚙️ Настройки"), types.KeyboardButton(text="🧪 Тест (5 сек)")],
+            [types.KeyboardButton(text="🧹 Полная очистка"), types.KeyboardButton(text="⚙️ Настройки")],
+            [types.KeyboardButton(text="🧪 Тест (5 сек)")],
         ],
         resize_keyboard=True
     )
@@ -108,7 +100,6 @@ def get_main_keyboard():
 # Работа с очередью/файлами
 # ─────────────────────────────────────────────────────────────
 def refresh_material_queue():
-    """Обновляет material_pairs, убирая несуществующие файлы"""
     global material_pairs
     valid_pairs = []
     removed_count = 0
@@ -116,17 +107,15 @@ def refresh_material_queue():
         if os.path.exists(image_path) and os.path.exists(text_path):
             valid_pairs.append((image_path, text_path))
         else:
-            logging.warning(f"Удалена неактуальная пара из очереди: {image_path}, {text_path}")
+            logging.warning(f"Удалена пара: {image_path}, {text_path}")
             removed_count += 1
     material_pairs = valid_pairs
     if removed_count > 0:
-        logging.info(f"Очередь обновлена: удалено {removed_count} неактуальных публикаций, осталось: {len(material_pairs)}")
-    else:
-        logging.info(f"Очередь обновлена: {len(material_pairs)} актуальных публикаций")
+        logging.info(f"Очередь обновлена: удалено {removed_count}, осталось: {len(material_pairs)}")
 
 def load_and_move_materials():
     global material_pairs
-    logging.info("=== НАЧАЛО ЗАГРУЗКИ МАТЕРИАЛОВ ===")
+    logging.info("=== ЗАГРУЗКА МАТЕРИАЛОВ ===")
     material_pairs = []
     
     # Сначала wait
@@ -143,7 +132,7 @@ def load_and_move_materials():
             if os.path.exists(image_path) and os.path.exists(text_path):
                 material_pairs.append((image_path, text_path))
 
-    # Если в wait пусто — берём из materials и переносим в wait
+    # Если в wait пусто — берём из materials
     if not material_pairs:
         materials_files = os.listdir(materials_folder) if os.path.exists(materials_folder) else []
         images = [f for f in materials_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
@@ -167,7 +156,6 @@ def load_and_move_materials():
 
     random.shuffle(material_pairs)
     logging.info(f"Загружено {len(material_pairs)} публикаций.")
-    logging.info("=== КОНЕЦ ЗАГРУЗКИ МАТЕРИАЛОВ ===")
 
 def archive_sent_files(image_path, text_path):
     try:
@@ -180,19 +168,14 @@ def archive_sent_files(image_path, text_path):
 
         if os.path.exists(image_wait):
             shutil.move(image_wait, image_archive)
-        else:
-            logging.warning(f"Файл изображения не существует в wait: {image_wait}")
-
         if os.path.exists(text_wait):
             shutil.move(text_wait, text_archive)
-        else:
-            logging.warning(f"Файл текста не существует в wait: {text_wait}")
 
         global material_pairs
         material_pairs = [(img, txt) for img, txt in material_pairs if img != image_path and txt != text_path]
 
     except Exception as e:
-        logging.error(f"Ошибка при архивировании файлов: {e}", exc_info=True)
+        logging.error(f"Ошибка архивирования: {e}", exc_info=True)
 
 # ─────────────────────────────────────────────────────────────
 # Отправка
@@ -200,10 +183,10 @@ def archive_sent_files(image_path, text_path):
 async def send_material_pair(image_path, text_path):
     try:
         if not os.path.exists(image_path):
-            logging.error(f"Файл изображения не найден: {image_path}")
+            logging.error(f"Файл не найден: {image_path}")
             return
         if not os.path.exists(text_path):
-            logging.error(f"Файл текста не найден: {text_path}")
+            logging.error(f"Файл не найден: {text_path}")
             return
 
         with open(text_path, 'r', encoding='utf-8') as f:
@@ -219,28 +202,24 @@ async def send_material_pair(image_path, text_path):
         archive_sent_files(image_path, text_path)
 
     except Exception as e:
-        logging.error(f"Ошибка при отправке {image_path}: {e}", exc_info=True)
+        logging.error(f"Ошибка отправки {image_path}: {e}", exc_info=True)
 
 # ─────────────────────────────────────────────────────────────
 # Планирование
 # ─────────────────────────────────────────────────────────────
 def schedule_posts():
     global scheduled_tasks
-
-    logging.info("=== НАЧАЛО ПЛАНИРОВАНИЯ ПОСТОВ ===")
-    logging.info(f"Количество материалов: {len(material_pairs)}")
-    logging.info(f"Частота: {PUBLICATIONS_PER_DAY}")
-
+    logging.info("=== ПЛАНИРОВАНИЕ ===")
+    
     try:
         schedule.clear('post')
     except Exception as e:
-        logging.warning(f"Ошибка очистки расписания: {e}")
+        logging.warning(f"Ошибка очистки: {e}")
 
     scheduled_tasks.clear()
 
     if not material_pairs:
-        logging.info("Нет публикаций для планирования")
-        logging.info("=== КОНЕЦ ПЛАНИРОВАНИЯ ===")
+        logging.info("Нет публикаций")
         return
 
     now_local = get_current_time()
@@ -278,7 +257,6 @@ def schedule_posts():
     future_slots = build_future_slots(needed)
 
     planned_count = 0
-
     for idx, (run_local, period_label) in enumerate(future_slots[:needed]):
         try:
             run_utc = run_local.astimezone(timezone.utc)
@@ -300,15 +278,14 @@ def schedule_posts():
             job = schedule.every().day.at(time_str_local).do(enqueue_once).tag('post', f'idx-{idx}')
             job.next_run = run_utc.replace(tzinfo=None)
 
-            logging.info(f"Публикация {idx+1}: {time_str_local} ({note})")
+            logging.info(f"Публикация {idx+1}: {time_str_local}")
             planned_count += 1
 
         except Exception as e:
-            logging.exception(f"Ошибка планирования {idx+1}: {e}")
+            logging.exception(f"Ошибка {idx+1}: {e}")
 
     scheduled_tasks.sort(key=lambda x: x["run_dt_utc"])
     logging.info(f"Запланировано {planned_count} публикаций")
-    logging.info("=== КОНЕЦ ПЛАНИРОВАНИЯ ===")
 
 # ─────────────────────────────────────────────────────────────
 # Отображение запланированных
@@ -332,10 +309,10 @@ def get_scheduled_publications_info(limit: int = 50) -> list[str]:
     return lines
 
 # ─────────────────────────────────────────────────────────────
-# Планировщик-луп
+# Планировщик
 # ─────────────────────────────────────────────────────────────
 async def run_scheduler_loop():
-    logging.info("=== ЗАПУСК ПЛАНИРОВЩИКА ===")
+    logging.info("=== ПЛАНИРОВЩИК ===")
     while True:
         schedule.run_pending()
         await asyncio.sleep(10)
@@ -347,16 +324,13 @@ async def run_scheduler_loop():
 async def cmd_start(message: types.Message):
     welcome_text = (
         "🚀 <b>Бот для автоматических публикаций</b>\n\n"
-        "Используй кнопки ниже для управления:\n"
+        "Используй кнопки для управления:\n"
         "• <b>📊 Статистика</b> - общая информация\n"
         "• <b>📅 Расписание</b> - планирование публикаций\n"
-        "• <b>⏰ Следующие</b> - ближайшие публикации\n"
-        "• <b>📋 Все публикации</b> - список всех файлов\n"
         "• <b>🔄 Перезагрузить</b> - обновить материалы\n"
         "• <b>⏹ Остановить</b> - отменить все публикации\n"
         "• <b>⏸ Пауза</b> - приостановить публикации\n"
         "• <b>▶️ Продолжить</b> - возобновить публикации\n"
-        "• <b>🗑 Очистить очередь</b> - очистить очередь в памяти\n"
         "• <b>🧹 Полная очистка</b> - удалить ВСЕ файлы\n"
         "• <b>⚙️ Настройки</b> - частота публикаций\n"
         "• <b>🧪 Тест (5 сек)</b> - тестовая публикация"
@@ -378,13 +352,13 @@ async def button_stats(message: types.Message):
         arch_files = len([f for f in os.listdir(archive_folder) if os.path.isfile(os.path.join(archive_folder, f))]) if os.path.exists(archive_folder) else 0
         arch_pairs = arch_files // 2
 
-        response = "📊 <b>Статистика бота:</b>\n\n"
-        response += f"📥 В materials: {materials_pairs} публикаций ({materials_files} файлов)\n"
-        response += f"⏳ В wait: {wait_pairs} публикаций ({wait_files} файлов)\n"
-        response += f"📁 В arch: {arch_pairs} публикаций ({arch_files} файлов)\n"
-        response += f"📋 В очереди: {len(material_pairs)} публикаций\n"
-        response += f"📅 Запланировано: {len([j for j in schedule.jobs if 'post' in getattr(j, 'tags', [])])} задач\n"
-        response += f"⚙️ Частота: {PUBLICATIONS_PER_DAY} постов/день\n"
+        response = "📊 <b>Статистика:</b>\n\n"
+        response += f"📥 materials: {materials_pairs} ({materials_files} файлов)\n"
+        response += f"⏳ wait: {wait_pairs} ({wait_files} файлов)\n"
+        response += f"📁 arch: {arch_pairs} ({arch_files} файлов)\n"
+        response += f"📋 очередь: {len(material_pairs)} публикаций\n"
+        response += f"📅 запланировано: {len([j for j in schedule.jobs if 'post' in getattr(j, 'tags', [])])} задач\n"
+        response += f"⚙️ частота: {PUBLICATIONS_PER_DAY} постов/день\n"
 
         await message.answer(response, parse_mode="HTML", reply_markup=get_main_keyboard())
     except Exception as e:
@@ -395,10 +369,10 @@ async def button_schedule(message: types.Message):
     refresh_material_queue()
 
     if not material_pairs:
-        await message.answer("📭 Очередь публикаций пуста.", reply_markup=get_main_keyboard())
+        await message.answer("📭 Очередь пуста.", reply_markup=get_main_keyboard())
         return
 
-    response = "📅 <b>Планирование публикаций:</b>\n\n"
+    response = "📅 <b>Планирование:</b>\n\n"
     response += "📥 <b>В очереди:</b>\n"
     for i, (image_path, text_path) in enumerate(material_pairs[:15], 1):
         filename = os.path.basename(image_path)
@@ -409,54 +383,11 @@ async def button_schedule(message: types.Message):
         response += f"{i}. {filename}\n"
 
     response += f"\n📊 Всего: {len(material_pairs)} публикаций\n"
-    response += f"⚙️ Частота: {PUBLICATIONS_PER_DAY} пост{'ов' if PUBLICATIONS_PER_DAY != 1 else ''}/день\n"
 
     lines = get_scheduled_publications_info(limit=50)
     if lines:
-        response += "\n⏰ <b>Все запланированные публикации:</b>\n" + "\n".join(lines) + "\n"
+        response += "\n⏰ <b>Запланировано:</b>\n" + "\n".join(lines) + "\n"
 
-    await message.answer(response, parse_mode="HTML", reply_markup=get_main_keyboard())
-
-@dp.message(lambda message: message.text == "⏰ Следующие")
-async def button_next(message: types.Message):
-    jobs = [j for j in schedule.jobs if 'post' in getattr(j, 'tags', [])]
-
-    if not jobs:
-        await message.answer("📭 Нет запланированных публикаций.", reply_markup=get_main_keyboard())
-        return
-
-    current_time = get_current_time()
-    valid_jobs = []
-    for job in jobs:
-        if hasattr(job, 'next_run') and job.next_run:
-            next_run = job.next_run.replace(tzinfo=timezone.utc) if job.next_run.tzinfo is None else job.next_run
-            valid_jobs.append((job, next_run))
-
-    sorted_jobs = sorted(valid_jobs, key=lambda x: x[1])
-    response = "⏰ <b>Следующие публикации:</b>\n\n"
-
-    shown_count = 0
-    for job, next_run in sorted_jobs:
-        if shown_count >= 5:
-            break
-        try:
-            if next_run and next_run > current_time:
-                run_local = next_run.astimezone(TZ_RIGA)
-                hour = run_local.hour
-                time_period = "🌅 Утро" if 6 <= hour <= 11 else "☀️ День" if 12 <= hour <= 17 else "🌆 Вечер" if 18 <= hour <= 23 else "🌙 Ночь"
-                time_str = run_local.strftime("%d.%m.%Y %H:%M")
-                response += f"<b>{shown_count + 1}.</b> {time_str} ({time_period})\n"
-                shown_count += 1
-        except Exception as e:
-            logging.error(f"Ошибка button_next: {e}")
-            if shown_count < 5:
-                response += f"<b>{shown_count + 1}.</b> Запланировано\n"
-                shown_count += 1
-
-    if shown_count == 0:
-        response += "📭 Все запланированные публикации в прошлом\n"
-
-    response += f"\n📊 Всего запланировано: {len(valid_jobs)} публикаций"
     await message.answer(response, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(lambda message: message.text == "🔄 Перезагрузить")
@@ -464,7 +395,7 @@ async def button_reload(message: types.Message):
     try:
         schedule.clear('post')
     except Exception as e:
-        logging.warning(f"Ошибка очистки расписания: {e}")
+        logging.warning(f"Ошибка очистки: {e}")
     global material_pairs
     material_pairs = []
 
@@ -472,24 +403,24 @@ async def button_reload(message: types.Message):
     if material_pairs:
         schedule_posts()
         await message.answer(
-            f"✅ Перезагружено {len(material_pairs)} публикаций. "
+            f"✅ Загружено {len(material_pairs)} публикаций. "
             f"Запланировано {len([j for j in schedule.jobs if 'post' in getattr(j, 'tags', [])])} постов.",
             reply_markup=get_main_keyboard()
         )
     else:
-        await message.answer("❌ Нет публикаций для загрузки.", reply_markup=get_main_keyboard())
+        await message.answer("❌ Нет публикаций.", reply_markup=get_main_keyboard())
 
 @dp.message(lambda message: message.text == "⏹ Остановить")
 async def button_stop(message: types.Message):
     try:
         schedule.clear('post')
     except Exception as e:
-        logging.warning(f"Ошибка очистки расписания: {e}")
+        logging.warning(f"Ошибка очистки: {e}")
     global material_pairs
     cleared_count = len(material_pairs)
     material_pairs = []
     await message.answer(
-        f"⏹ Все публикации остановлены!\nОчередь очищена: {cleared_count} публикаций",
+        f"⏹ Остановлено!\nОчередь очищена: {cleared_count} публикаций",
         reply_markup=get_main_keyboard()
     )
 
@@ -498,15 +429,15 @@ async def button_pause(message: types.Message):
     try:
         schedule.clear('post')
     except Exception as e:
-        logging.warning(f"Ошибка очистки расписания: {e}")
-    await message.answer("⏸ Публикации приостановлены.", reply_markup=get_main_keyboard())
+        logging.warning(f"Ошибка очистки: {e}")
+    await message.answer("⏸ Пауза", reply_markup=get_main_keyboard())
 
 @dp.message(lambda message: message.text == "▶️ Продолжить")
 async def button_resume(message: types.Message):
     if material_pairs:
         schedule_posts()
         await message.answer(
-            f"▶️ Публикации возобновлены. "
+            f"▶️ Возобновлено. "
             f"Запланировано {len([j for j in schedule.jobs if 'post' in getattr(j, 'tags', [])])} постов.",
             reply_markup=get_main_keyboard()
         )
@@ -515,34 +446,19 @@ async def button_resume(message: types.Message):
         if material_pairs:
             schedule_posts()
             await message.answer(
-                f"▶️ Публикации возобновлены. "
+                f"▶️ Возобновлено. "
                 f"Запланировано {len([j for j in schedule.jobs if 'post' in getattr(j, 'tags', [])])} постов.",
                 reply_markup=get_main_keyboard()
             )
         else:
-            await message.answer("📭 Нет публикаций для возобновления.", reply_markup=get_main_keyboard())
-
-@dp.message(lambda message: message.text == "🗑 Очистить очередь")
-async def button_clear_queue(message: types.Message):
-    global material_pairs
-    cleared_count = len(material_pairs)
-    material_pairs = []
-    try:
-        schedule.clear('post')
-    except Exception as e:
-        logging.warning(f"Ошибка очистки расписания: {e}")
-
-    await message.answer(
-        f"🗑 Очередь очищена!\nУдалено: {cleared_count} публикаций\n(Файлы в materials/wait сохранены)",
-        reply_markup=get_main_keyboard()
-    )
+            await message.answer("📭 Нет публикаций.", reply_markup=get_main_keyboard())
 
 @dp.message(lambda message: message.text == "🧹 Полная очистка")
 async def button_full_clear(message: types.Message):
     try:
         schedule.clear('post')
     except Exception as e:
-        logging.warning(f"Ошибка очистки расписания: {e}")
+        logging.warning(f"Ошибка очистки: {e}")
 
     global material_pairs
     cleared_memory = len(material_pairs)
@@ -558,9 +474,9 @@ async def button_full_clear(message: types.Message):
                         os.remove(file_path)
                         deleted_materials += 1
                 except Exception as e:
-                    logging.error(f"Ошибка удаления файла {filename}: {e}")
+                    logging.error(f"Ошибка {filename}: {e}")
         except Exception as e:
-            logging.error(f"Ошибка при очистке папки materials: {e}")
+            logging.error(f"Ошибка materials: {e}")
 
     deleted_wait = 0
     if os.path.exists(pending_folder):
@@ -572,9 +488,9 @@ async def button_full_clear(message: types.Message):
                         os.remove(file_path)
                         deleted_wait += 1
                 except Exception as e:
-                    logging.error(f"Ошибка удаления файла из wait {filename}: {e}")
+                    logging.error(f"Ошибка wait {filename}: {e}")
         except Exception as e:
-            logging.error(f"Ошибка при очистке папки wait: {e}")
+            logging.error(f"Ошибка wait: {e}")
 
     deleted_arch = 0
     if os.path.exists(archive_folder):
@@ -586,20 +502,16 @@ async def button_full_clear(message: types.Message):
                         os.remove(file_path)
                         deleted_arch += 1
                 except Exception as e:
-                    logging.error(f"Ошибка удаления файла из архива {filename}: {e}")
+                    logging.error(f"Ошибка arch {filename}: {e}")
         except Exception as e:
-            logging.error(f"Ошибка при очистке папки archive: {e}")
+            logging.error(f"Ошибка arch: {e}")
 
     response = (
-        f"🧹 <b>Полная очистка завершена!</b>\n\n"
-        f"📥 Из materials удалено: {deleted_materials} файлов\n"
-        f"⏳ Из wait удалено: {deleted_wait} файлов\n"
-        f"📁 Из archive удалено: {deleted_arch} файлов\n"
-        f"📋 Очередь в памяти очищена: {cleared_memory} публикаций\n"
-        f"📅 Расписание остановлено\n\n"
-        f"<b>Теперь можно:</b>\n"
-        f"1. Загрузить новые файлы в папку <code>materials</code>\n"
-        f"2. Нажать '🔄 Перезагрузить' для запуска"
+        f"🧹 Очистка завершена!\n\n"
+        f"📥 materials: {deleted_materials} файлов\n"
+        f"⏳ wait: {deleted_wait} файлов\n"
+        f"📁 arch: {deleted_arch} файлов\n"
+        f"📋 очередь: {cleared_memory} публикаций\n"
     )
     await message.answer(response, parse_mode="HTML", reply_markup=get_main_keyboard())
 
@@ -613,8 +525,8 @@ async def button_settings(message: types.Message):
     ])
 
     await message.answer(
-        f"⚙️ <b>Настройки публикаций</b>\n\n"
-        f"Текущая частота: {PUBLICATIONS_PER_DAY} постов в день\n\n"
+        f"⚙️ <b>Настройки</b>\n\n"
+        f"Частота: {PUBLICATIONS_PER_DAY} постов/день\n\n"
         f"Выберите новую частоту:",
         parse_mode="HTML",
         reply_markup=keyboard
@@ -628,23 +540,15 @@ async def button_test_fast(message: types.Message):
     if len(material_pairs) >= 1:
         first_pair = material_pairs[0]
         
-        # Планируем тестовую публикацию через 5 секунд
         def test_publish():
             asyncio.create_task(send_material_pair(first_pair[0], first_pair[1]))
             return schedule.CancelJob
         
         schedule.every(5).seconds.do(test_publish).tag('test')
         
-        await message.answer(
-            "🚀 Тест запущен!\n"
-            "⏰ Публикация через 5 секунд",
-            reply_markup=get_main_keyboard()
-        )
+        await message.answer("🚀 Тест через 5 секунд", reply_markup=get_main_keyboard())
     else:
-        await message.answer(
-            "❌ Нужен хотя бы 1 файл (файл.jpg + файл.txt)",
-            reply_markup=get_main_keyboard()
-        )
+        await message.answer("❌ Нужен 1 файл (jpg + txt)", reply_markup=get_main_keyboard())
 
 @dp.callback_query(F.data.startswith("freq_"))
 async def handle_frequency_change(query: CallbackQuery):
@@ -661,7 +565,7 @@ async def handle_frequency_change(query: CallbackQuery):
             try:
                 schedule.clear('post')
             except Exception as e:
-                logging.warning(f"Ошибка очистки расписания: {e}")
+                logging.warning(f"Ошибка очистки: {e}")
 
             material_pairs.clear()
             load_and_move_materials()
@@ -676,7 +580,7 @@ async def handle_frequency_change(query: CallbackQuery):
                     f"Запланировано: {scheduled_count} постов"
                 )
             else:
-                message_text = f"✅ Частота изменена на {PUBLICATIONS_PER_DAY} постов/день\nНет материалов"
+                message_text = f"✅ Частота: {PUBLICATIONS_PER_DAY} постов/день\nНет материалов"
 
             try:
                 await query.message.edit_text(message_text, parse_mode="HTML")
@@ -689,23 +593,23 @@ async def handle_frequency_change(query: CallbackQuery):
                 await query.message.answer(message_text, parse_mode="HTML")
 
         except Exception as e:
-            logging.error("Ошибка при изменении частоты", exc_info=True)
-            await query.answer("Ошибка при изменении частоты!")
+            logging.error("Ошибка частоты", exc_info=True)
+            await query.answer("Ошибка!")
             try:
-                await query.message.answer("❌ Ошибка при изменении частоты", parse_mode="HTML")
+                await query.message.answer("❌ Ошибка частоты", parse_mode="HTML")
             except Exception as send_error:
-                logging.error(f"Ошибка при отправке сообщения об ошибке: {send_error}")
+                logging.error(f"Ошибка: {send_error}")
 
 # ─────────────────────────────────────────────────────────────
-# AIOHTTP endpoints + lifecycle
+# Webhook handlers
 # ─────────────────────────────────────────────────────────────
 async def on_startup(bot: Bot):
-    logging.info("=== ЗАПУСК НА RENDER ===")
+    logging.info("=== СТАРТ НА RENDER ===")
     
     try:
         schedule.clear('post')
     except Exception as e:
-        logging.error(f"Ошибка очистки планировщика: {e}", exc_info=True)
+        logging.error(f"Ошибка: {e}", exc_info=True)
 
     WEBHOOK_URL = f"{APP_BASE_URL}/webhook"
     await bot.set_webhook(
@@ -713,7 +617,7 @@ async def on_startup(bot: Bot):
         allowed_updates=["message", "callback_query"],
         drop_pending_updates=True,
     )
-    logging.info(f"Webhook установлен: {WEBHOOK_URL}")
+    logging.info(f"Webhook: {WEBHOOK_URL}")
 
     asyncio.create_task(run_scheduler_loop())
     
@@ -722,7 +626,7 @@ async def on_startup(bot: Bot):
         schedule_posts()
 
 async def on_shutdown(bot: Bot):
-    logging.info("=== ОСТАНОВКА ===")
+    logging.info("=== СТОП ===")
     await bot.session.close()
 
 async def health(request: web.Request):
@@ -735,7 +639,7 @@ async def tick(request: web.Request):
     return web.Response(text="tick")
 
 def main():
-    logging.info("=== ЗАПУСК НА RENDER ===")
+    logging.info("=== СТАРТ НА RENDER ===")
     
     port = int(os.environ.get("PORT", 10000))
     
