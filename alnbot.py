@@ -49,11 +49,9 @@ _freq_lock = asyncio.Lock()
 base_path = os.path.dirname(os.path.abspath(__file__))
 materials_folder = os.path.join(base_path, "materials")
 pending_folder = os.path.join(base_path, "wait")
-archive_folder = os.path.join(base_path, "arch")
 
 os.makedirs(materials_folder, exist_ok=True)
 os.makedirs(pending_folder, exist_ok=True)
-os.makedirs(archive_folder, exist_ok=True)
 
 is_test_mode = False
 original_material_pairs = []
@@ -81,7 +79,7 @@ def random_time(start_hour, end_hour):
     return f"{hour:02d}:{minute:02d}"
 
 # ─────────────────────────────────────────────────────────────
-# UI - УПРОЩЕННОЕ МЕНЮ
+# UI
 # ─────────────────────────────────────────────────────────────
 def get_main_keyboard():
     keyboard = types.ReplyKeyboardMarkup(
@@ -118,7 +116,7 @@ def load_and_move_materials():
     logging.info("=== ЗАГРУЗКА МАТЕРИАЛОВ ===")
     material_pairs = []
     
-    # Сначала wait
+    # Сначала проверяем папку wait
     wait_files = os.listdir(pending_folder) if os.path.exists(pending_folder) else []
     wait_images = [f for f in wait_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
     wait_texts = [f for f in wait_files if f.lower().endswith('.txt')]
@@ -132,7 +130,7 @@ def load_and_move_materials():
             if os.path.exists(image_path) and os.path.exists(text_path):
                 material_pairs.append((image_path, text_path))
 
-    # Если в wait пусто — берём из materials
+    # Если в wait пусто — берём из materials и переносим в wait
     if not material_pairs:
         materials_files = os.listdir(materials_folder) if os.path.exists(materials_folder) else []
         images = [f for f in materials_files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
@@ -151,31 +149,28 @@ def load_and_move_materials():
                         shutil.move(src_image, dst_image)
                         shutil.move(src_text, dst_text)
                         material_pairs.append((dst_image, dst_text))
+                        logging.info(f"Перемещено: {image} + {text_file}")
                 except Exception as e:
                     logging.error(f"Ошибка перемещения {image}: {e}")
 
     random.shuffle(material_pairs)
     logging.info(f"Загружено {len(material_pairs)} публикаций.")
 
-def archive_sent_files(image_path, text_path):
+def remove_sent_files(image_path, text_path):
+    """Удаляет опубликованные файлы из папки wait"""
     try:
-        image_name = os.path.basename(image_path)
-        text_name = os.path.basename(text_path)
-        image_wait = os.path.join(pending_folder, image_name)
-        text_wait = os.path.join(pending_folder, text_name)
-        image_archive = os.path.join(archive_folder, image_name)
-        text_archive = os.path.join(archive_folder, text_name)
-
-        if os.path.exists(image_wait):
-            shutil.move(image_wait, image_archive)
-        if os.path.exists(text_wait):
-            shutil.move(text_wait, text_archive)
+        if os.path.exists(image_path):
+            os.remove(image_path)
+            logging.info(f"Удален: {os.path.basename(image_path)}")
+        if os.path.exists(text_path):
+            os.remove(text_path)
+            logging.info(f"Удален: {os.path.basename(text_path)}")
 
         global material_pairs
         material_pairs = [(img, txt) for img, txt in material_pairs if img != image_path and txt != text_path]
 
     except Exception as e:
-        logging.error(f"Ошибка архивирования: {e}", exc_info=True)
+        logging.error(f"Ошибка удаления: {e}", exc_info=True)
 
 # ─────────────────────────────────────────────────────────────
 # Отправка
@@ -199,7 +194,7 @@ async def send_material_pair(image_path, text_path):
             disable_notification=True
         )
         logging.info(f"Отправлено: {os.path.basename(image_path)}")
-        archive_sent_files(image_path, text_path)
+        remove_sent_files(image_path, text_path)
 
     except Exception as e:
         logging.error(f"Ошибка отправки {image_path}: {e}", exc_info=True)
@@ -349,13 +344,10 @@ async def button_stats(message: types.Message):
         materials_pairs = materials_files // 2
         wait_files = len([f for f in os.listdir(pending_folder) if os.path.isfile(os.path.join(pending_folder, f))]) if os.path.exists(pending_folder) else 0
         wait_pairs = wait_files // 2
-        arch_files = len([f for f in os.listdir(archive_folder) if os.path.isfile(os.path.join(archive_folder, f))]) if os.path.exists(archive_folder) else 0
-        arch_pairs = arch_files // 2
 
         response = "📊 <b>Статистика:</b>\n\n"
         response += f"📥 materials: {materials_pairs} ({materials_files} файлов)\n"
         response += f"⏳ wait: {wait_pairs} ({wait_files} файлов)\n"
-        response += f"📁 arch: {arch_pairs} ({arch_files} файлов)\n"
         response += f"📋 очередь: {len(material_pairs)} публикаций\n"
         response += f"📅 запланировано: {len([j for j in schedule.jobs if 'post' in getattr(j, 'tags', [])])} задач\n"
         response += f"⚙️ частота: {PUBLICATIONS_PER_DAY} постов/день\n"
@@ -373,7 +365,7 @@ async def button_schedule(message: types.Message):
         return
 
     response = "📅 <b>Планирование:</b>\n\n"
-    response += "📥 <b>В очереди:</b>\n"
+    response += "⏳ <b>В очереди:</b>\n"
     for i, (image_path, text_path) in enumerate(material_pairs[:15], 1):
         filename = os.path.basename(image_path)
         for ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
@@ -492,25 +484,10 @@ async def button_full_clear(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка wait: {e}")
 
-    deleted_arch = 0
-    if os.path.exists(archive_folder):
-        try:
-            for filename in os.listdir(archive_folder):
-                file_path = os.path.join(archive_folder, filename)
-                try:
-                    if os.path.isfile(file_path):
-                        os.remove(file_path)
-                        deleted_arch += 1
-                except Exception as e:
-                    logging.error(f"Ошибка arch {filename}: {e}")
-        except Exception as e:
-            logging.error(f"Ошибка arch: {e}")
-
     response = (
         f"🧹 Очистка завершена!\n\n"
         f"📥 materials: {deleted_materials} файлов\n"
         f"⏳ wait: {deleted_wait} файлов\n"
-        f"📁 arch: {deleted_arch} файлов\n"
         f"📋 очередь: {cleared_memory} публикаций\n"
     )
     await message.answer(response, parse_mode="HTML", reply_markup=get_main_keyboard())
