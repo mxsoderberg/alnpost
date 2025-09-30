@@ -3,18 +3,23 @@ chcp 65001 >nul
 title Обновление кода бота
 
 cls
-echo Обновление кода бота...
+echo ================================
+echo    ОБНОВЛЕНИЕ КОДА БОТА
+echo ================================
+
 cd /d C:\Users\mx\Desktop\sturm\alnpost
 
+echo Обновление кода бота...
 git add alnbot.py
 git commit -m "Обновление кода %date% %time%"
 git push origin master
 
 if %errorlevel%==0 (
-    echo Код обновлен! Открытие Render...
-    start "" "https://dashboard.render.com"
+    echo.
+    echo УСПЕХ! Код обновлен.
+    echo GitHub Actions автоматически запустит деплой.
 ) else (
-    echo Ошибка обновления кода!
+    echo ОШИБКА обновления кода!
 )
 
 pause
