@@ -34,7 +34,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Часовой пояс UTC+2
-TZ_LOCAL = ZoneInfo("Europe/Kiev")  # Это UTC+2/+3
+TZ_LOCAL = ZoneInfo("Etc/GMT-2")  # Это точно UTC+2
 
 # ─────────────────────────────────────────────────────────────
 # Глобальные структуры
@@ -252,7 +252,6 @@ def schedule_posts():
     future_slots = build_future_slots(needed)
 
     planned_count = 0
-    published_indices = set()
     
     for idx, (run_local, period_label) in enumerate(future_slots[:needed]):
         try:
@@ -275,6 +274,7 @@ def schedule_posts():
                     for task in scheduled_tasks:
                         if task["material_index"] == task_idx:
                             task["published"] = True
+                            logging.info(f"Помечена как опубликованная задача {task_idx}")
                             break
                     return schedule.CancelJob
                 return job_func
@@ -286,7 +286,7 @@ def schedule_posts():
             ).tag('post', f'idx-{idx}')
             job.next_run = run_utc.replace(tzinfo=None)
 
-            logging.info(f"Публикация {idx+1}: {time_str_local} ({run_local.strftime('%d.%m.%Y')})")
+            logging.info(f"Публикация {idx+1}: {time_str_local} ({run_local.strftime('%d.%m.%Y')}) - запланирована")
             planned_count += 1
 
         except Exception as e:
@@ -314,7 +314,7 @@ def get_scheduled_publications_info(limit: int = 50) -> list[str]:
         
         # Проверяем, опубликован ли пост
         if item.get("published", False):
-            line = f"• ~~{run_local.strftime('%d.%m.%Y %H:%M')} ({note})~~ *(опубликовано)*"
+            line = f"• {run_local.strftime('%d.%m.%Y %H:%M')} ({note}) [опубликовано]"
         else:
             line = f"• {run_local.strftime('%d.%m.%Y %H:%M')} ({note})"
             
@@ -404,7 +404,7 @@ async def button_schedule(message: types.Message):
     else:
         response += "\n⏰ Нет запланированных публикаций\n"
 
-    await message.answer(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await message.answer(response, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(lambda message: message.text == "🔄 Перезагрузить")
 async def button_reload(message: types.Message):
@@ -606,6 +606,7 @@ async def handle_frequency_change(query: CallbackQuery):
 # ─────────────────────────────────────────────────────────────
 async def on_startup(bot: Bot):
     logging.info("=== СТАРТ НА RENDER ===")
+    logging.info(f"Часовой пояс: {TZ_LOCAL}")
     
     try:
         schedule.clear('post')
