@@ -33,8 +33,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Часовой пояс Риги
-TZ_RIGA = ZoneInfo("Europe/Riga")
+# Часовой пояс UTC+2
+TZ_LOCAL = ZoneInfo("Europe/Kiev")  # Это UTC+2/+3
 
 # ─────────────────────────────────────────────────────────────
 # Глобальные структуры
@@ -60,7 +60,7 @@ original_material_pairs = []
 # Время и утилиты
 # ─────────────────────────────────────────────────────────────
 def get_current_time() -> datetime:
-    return datetime.now(tz=TZ_RIGA)
+    return datetime.now(tz=TZ_LOCAL)
 
 def describe_part_of_day(dt_local: datetime) -> str:
     h = dt_local.hour
@@ -222,9 +222,9 @@ def schedule_posts():
 
     def day_windows(freq: int):
         if freq <= 1:
-            return [(9, 11, "утро")]
+            return [(9, 11, "утро")]  # 9-11 утра
         if freq == 2:
-            return [(8, 11, "утро"), (18, 21, "вечер")]
+            return [(8, 11, "утро"), (18, 21, "вечер")]  # Утро и вечер
         if freq == 3:
             return [(8, 11, "утро"), (12, 17, "день"), (18, 21, "вечер")]
         return [(8, 10, "раннее утро"), (11, 13, "полдень"), (14, 17, "день"), (18, 21, "вечер")]
@@ -239,7 +239,7 @@ def schedule_posts():
             date = anchor_date + timedelta(days=d)
             for (h1, h2, label) in windows[:PUBLICATIONS_PER_DAY]:
                 hh, mm = map(int, random_time(h1, h2).split(":"))
-                run_local = datetime(date.year, date.month, date.day, hh, mm, tzinfo=TZ_RIGA)
+                run_local = datetime(date.year, date.month, date.day, hh, mm, tzinfo=TZ_LOCAL)
                 if run_local > now_local:
                     slots.append((run_local, label))
             d += 1
@@ -252,6 +252,8 @@ def schedule_posts():
     future_slots = build_future_slots(needed)
 
     planned_count = 0
+    published_indices = set()
+    
     for idx, (run_local, period_label) in enumerate(future_slots[:needed]):
         try:
             run_utc = run_local.astimezone(timezone.utc)
@@ -260,20 +262,31 @@ def schedule_posts():
             scheduled_tasks.append({
                 "run_dt_utc": run_utc,
                 "note": note,
-                "material_index": idx
+                "material_index": idx,
+                "published": False
             })
 
             image_path, text_path = material_pairs[idx]
 
-            def enqueue_once(img=image_path, txt=text_path):
-                asyncio.create_task(send_material_pair(img, txt))
-                return schedule.CancelJob
+            def create_job(img_path, txt_path, task_idx):
+                def job_func():
+                    asyncio.create_task(send_material_pair(img_path, txt_path))
+                    # Помечаем задачу как опубликованную
+                    for task in scheduled_tasks:
+                        if task["material_index"] == task_idx:
+                            task["published"] = True
+                            break
+                    return schedule.CancelJob
+                return job_func
 
+            # Используем локальное время для планирования
             time_str_local = run_local.strftime("%H:%M")
-            job = schedule.every().day.at(time_str_local).do(enqueue_once).tag('post', f'idx-{idx}')
+            job = schedule.every().day.at(time_str_local).do(
+                create_job(image_path, text_path, idx)
+            ).tag('post', f'idx-{idx}')
             job.next_run = run_utc.replace(tzinfo=None)
 
-            logging.info(f"Публикация {idx+1}: {time_str_local}")
+            logging.info(f"Публикация {idx+1}: {time_str_local} ({run_local.strftime('%d.%m.%Y')})")
             planned_count += 1
 
         except Exception as e:
@@ -291,11 +304,20 @@ def get_scheduled_publications_info(limit: int = 50) -> list[str]:
 
     shown_count = 0
     for item in sorted(scheduled_tasks, key=lambda x: x["run_dt_utc"]):
-        run_local = item["run_dt_utc"].astimezone(TZ_RIGA)
+        run_local = item["run_dt_utc"].astimezone(TZ_LOCAL)
+        
+        # Пропускаем уже прошедшие даты
         if run_local <= now_local:
             continue
+            
         note = item.get("note") or describe_part_of_day(run_local)
-        line = f"• {run_local.strftime('%d.%m.%Y %H:%M')} ({note})"
+        
+        # Проверяем, опубликован ли пост
+        if item.get("published", False):
+            line = f"• ~~{run_local.strftime('%d.%m.%Y %H:%M')} ({note})~~ *(опубликовано)*"
+        else:
+            line = f"• {run_local.strftime('%d.%m.%Y %H:%M')} ({note})"
+            
         lines.append(line)
         shown_count += 1
         if shown_count >= limit:
@@ -379,8 +401,10 @@ async def button_schedule(message: types.Message):
     lines = get_scheduled_publications_info(limit=50)
     if lines:
         response += "\n⏰ <b>Запланировано:</b>\n" + "\n".join(lines) + "\n"
+    else:
+        response += "\n⏰ Нет запланированных публикаций\n"
 
-    await message.answer(response, parse_mode="HTML", reply_markup=get_main_keyboard())
+    await message.answer(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 @dp.message(lambda message: message.text == "🔄 Перезагрузить")
 async def button_reload(message: types.Message):
