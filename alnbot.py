@@ -33,8 +33,9 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Часовой пояс UTC+2
-TZ_LOCAL = ZoneInfo("Etc/GMT-2")  # Это точно UTC+2
+# Часовые пояса
+TZ_LOCAL = ZoneInfo("Europe/Riga")  # Пользовательский TZ с учетом DST
+SERVER_TZ = datetime.now().astimezone().tzinfo  # TZ сервера
 
 # ─────────────────────────────────────────────────────────────
 # Глобальные структуры
@@ -206,8 +207,10 @@ def schedule_posts():
     global scheduled_tasks
     logging.info("=== ПЛАНИРОВАНИЕ ===")
     
+    # Очищаем старые задачи
     try:
         schedule.clear('post')
+        schedule.clear('test')  # Также очищаем тестовые задачи
     except Exception as e:
         logging.warning(f"Ошибка очистки: {e}")
 
@@ -216,6 +219,10 @@ def schedule_posts():
     if not material_pairs:
         logging.info("Нет публикаций")
         return
+
+    # Диагностика часовых поясов
+    logging.info("Server TZ: %s, now=%s", SERVER_TZ, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"))
+    logging.info("User   TZ: %s, now=%s", TZ_LOCAL, datetime.now(TZ_LOCAL).strftime("%Y-%m-%d %H:%M:%S %Z"))
 
     now_local = get_current_time()
     anchor_date = now_local.date()
@@ -255,18 +262,12 @@ def schedule_posts():
     
     for idx, (run_local, period_label) in enumerate(future_slots[:needed]):
         try:
-            run_utc = run_local.astimezone(timezone.utc)
-            note = describe_part_of_day(run_local)
-
-            scheduled_tasks.append({
-                "run_dt_utc": run_utc,
-                "note": note,
-                "material_index": idx,
-                "published": False
-            })
-
+            # Преобразуем в локальное время сервера (schedule ждёт наивное "локальное")
+            run_server = run_local.astimezone(SERVER_TZ)
+            
+            # Готовим задачу как одноразовую
             image_path, text_path = material_pairs[idx]
-
+            
             def create_job(img_path, txt_path, task_idx):
                 def job_func():
                     asyncio.create_task(send_material_pair(img_path, txt_path))
@@ -279,14 +280,28 @@ def schedule_posts():
                     return schedule.CancelJob
                 return job_func
 
-            # Используем локальное время для планирования
-            time_str_local = run_local.strftime("%H:%M")
-            job = schedule.every().day.at(time_str_local).do(
+            job = schedule.every().day.do(
                 create_job(image_path, text_path, idx)
             ).tag('post', f'idx-{idx}')
-            job.next_run = run_utc.replace(tzinfo=None)
 
-            logging.info(f"Публикация {idx+1}: {time_str_local} ({run_local.strftime('%d.%m.%Y')}) - запланирована")
+            # Абсолютный момент старта в локальном времени сервера (наивный)
+            job.next_run = run_server.replace(tzinfo=None)
+
+            # Для UI и логов сохраняем UTC
+            run_utc = run_server.astimezone(timezone.utc)
+            scheduled_tasks.append({
+                "run_dt_utc": run_utc,
+                "note": describe_part_of_day(run_local),
+                "material_index": idx,
+                "published": False
+            })
+
+            logging.info(
+                "План: local=%s | server=%s | utc=%s",
+                run_local.strftime("%Y-%m-%d %H:%M %Z"),
+                run_server.strftime("%Y-%m-%d %H:%M %Z"),
+                run_utc.strftime("%Y-%m-%d %H:%M %Z"),
+            )
             planned_count += 1
 
         except Exception as e:
@@ -410,6 +425,7 @@ async def button_schedule(message: types.Message):
 async def button_reload(message: types.Message):
     try:
         schedule.clear('post')
+        schedule.clear('test')  # Также очищаем тестовые задачи
     except Exception as e:
         logging.warning(f"Ошибка очистки: {e}")
     global material_pairs
@@ -430,6 +446,7 @@ async def button_reload(message: types.Message):
 async def button_stop(message: types.Message):
     try:
         schedule.clear('post')
+        schedule.clear('test')  # Также очищаем тестовые задачи
     except Exception as e:
         logging.warning(f"Ошибка очистки: {e}")
     global material_pairs
@@ -444,6 +461,7 @@ async def button_stop(message: types.Message):
 async def button_pause(message: types.Message):
     try:
         schedule.clear('post')
+        schedule.clear('test')  # Также очищаем тестовые задачи
     except Exception as e:
         logging.warning(f"Ошибка очистки: {e}")
     await message.answer("⏸ Пауза", reply_markup=get_main_keyboard())
@@ -473,6 +491,7 @@ async def button_resume(message: types.Message):
 async def button_full_clear(message: types.Message):
     try:
         schedule.clear('post')
+        schedule.clear('test')  # Также очищаем тестовые задачи
     except Exception as e:
         logging.warning(f"Ошибка очистки: {e}")
 
@@ -565,6 +584,7 @@ async def handle_frequency_change(query: CallbackQuery):
 
             try:
                 schedule.clear('post')
+                schedule.clear('test')  # Также очищаем тестовые задачи
             except Exception as e:
                 logging.warning(f"Ошибка очистки: {e}")
 
@@ -606,10 +626,10 @@ async def handle_frequency_change(query: CallbackQuery):
 # ─────────────────────────────────────────────────────────────
 async def on_startup(bot: Bot):
     logging.info("=== СТАРТ НА RENDER ===")
-    logging.info(f"Часовой пояс: {TZ_LOCAL}")
     
     try:
         schedule.clear('post')
+        schedule.clear('test')  # Также очищаем тестовые задачи
     except Exception as e:
         logging.error(f"Ошибка: {e}", exc_info=True)
 
